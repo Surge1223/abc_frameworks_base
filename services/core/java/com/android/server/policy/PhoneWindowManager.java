@@ -108,6 +108,9 @@ import static android.view.WindowManager.LayoutParams.TYPE_VOICE_INTERACTION_STA
 import static android.view.WindowManager.LayoutParams.TYPE_VOLUME_OVERLAY;
 import static android.view.WindowManager.LayoutParams.TYPE_WALLPAPER;
 import static android.view.WindowManager.LayoutParams.isSystemAlertWindowType;
+import static android.view.WindowManager.SCREEN_RECORD_LOW_QUALITY;
+import static android.view.WindowManager.SCREEN_RECORD_MID_QUALITY;
+import static android.view.WindowManager.SCREEN_RECORD_HIGH_QUALITY;
 import static android.view.WindowManager.TAKE_SCREENSHOT_FULLSCREEN;
 import static android.view.WindowManager.TAKE_SCREENSHOT_SELECTED_REGION;
 import static android.view.WindowManagerGlobal.ADD_OKAY;
@@ -160,6 +163,10 @@ import android.hardware.hdmi.HdmiPlaybackClient.OneTouchPlayCallback;
 import android.hardware.input.InputManager;
 import android.hardware.input.InputManagerInternal;
 import android.hardware.power.V1_0.PowerHint;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.media.AudioAttributes;
 import android.media.AudioManager;
 import android.media.AudioSystem;
@@ -827,6 +834,12 @@ public class PhoneWindowManager implements WindowManagerPolicy {
     private boolean mVolumeWakeActive;
 
     private int mTorchActionMode;
+    private static final float PROXIMITY_DISTANCE_THRESHOLD = 5.0f;
+    private int mProximityTimeOut;
+    private SensorManager mSensorManager;
+    private Sensor mProximitySensor;
+    private SensorEventListener mProximityListener;
+    private android.os.PowerManager.WakeLock mProximityWakeLock;
 
     private static final int MSG_ENABLE_POINTER_LOCATION = 1;
     private static final int MSG_DISABLE_POINTER_LOCATION = 2;
@@ -855,6 +868,7 @@ public class PhoneWindowManager implements WindowManagerPolicy {
     private static final int MSG_HANDLE_ALL_APPS = 26;
     private static final int MSG_DISPATCH_VOLKEY_WITH_WAKE_LOCK = 27;
     private static final int MSG_TOGGLE_TORCH = 28;
+    private static final int MSG_CLEAR_PROXIMITY = 29;
 
     private static final int MSG_REQUEST_TRANSIENT_BARS_ARG_STATUS = 0;
     private static final int MSG_REQUEST_TRANSIENT_BARS_ARG_NAVIGATION = 1;
@@ -959,11 +973,78 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                     break;
                 }
                 case MSG_TOGGLE_TORCH:
-                    performHapticFeedbackLw(null, HapticFeedbackConstants.LONG_PRESS, true);
-                    AbcUtils.toggleCameraFlash();
+                    toggleFlashLightProximityCheck();
+                    break;
+                case MSG_CLEAR_PROXIMITY:
+                    cleanupProximity();
                     break;
             }
         }
+    }
+
+    private void runPostProximityCheck() {
+        if (mSensorManager == null) {
+            return;
+        }
+        synchronized (mProximityWakeLock) {
+            mProximityWakeLock.acquire();
+            mProximityListener = new SensorEventListener() {
+                @Override
+                public void onSensorChanged(SensorEvent event) {
+                    cleanupProximityLocked();
+                    if (!mHandler.hasMessages(MSG_CLEAR_PROXIMITY)) {
+                        return;
+                    }
+                    mHandler.removeMessages(MSG_CLEAR_PROXIMITY);
+                    final float distance = event.values[0];
+                    if (distance >= PROXIMITY_DISTANCE_THRESHOLD ||
+                            distance >= mProximitySensor.getMaximumRange()) {
+                        toggleFlashLight();
+                    }
+                }
+
+                @Override
+                public void onAccuracyChanged(Sensor sensor, int accuracy) {
+                }
+            };
+            mSensorManager.registerListener(mProximityListener,
+                   mProximitySensor, SensorManager.SENSOR_DELAY_FASTEST);
+        }
+    }
+
+    private void cleanupProximityLocked() {
+        if (mProximityWakeLock.isHeld()) {
+            mProximityWakeLock.release();
+        }
+        if (mProximityListener != null) {
+            mSensorManager.unregisterListener(mProximityListener);
+            mProximityListener = null;
+        }
+    }
+
+    private void cleanupProximity() {
+        synchronized (mProximityWakeLock) {
+            cleanupProximityLocked();
+        }
+    }
+
+    private void toggleFlashLightProximityCheck() {
+        if (mProximitySensor != null) {
+            if (mHandler.hasMessages(MSG_CLEAR_PROXIMITY)) {
+                // A message is already queued
+                return;
+            }
+            final Message newMsg = mHandler.obtainMessage(MSG_CLEAR_PROXIMITY);
+            mHandler.sendMessageDelayed(newMsg, mProximityTimeOut);
+            runPostProximityCheck();
+        } else {
+            toggleFlashLight();
+        }
+    }
+
+    private void toggleFlashLight() {
+        performHapticFeedbackLw(null, HapticFeedbackConstants.LONG_PRESS, true);
+        AbcUtils.toggleCameraFlash();
     }
 
     private UEventObserver mHDMIObserver = new UEventObserver() {
@@ -1568,8 +1649,7 @@ public class PhoneWindowManager implements WindowManagerPolicy {
         switch (behavior) {
             case MULTI_PRESS_POWER_NOTHING:
                 if ((mTorchActionMode == 1) && (!isScreenOn() || isDozeMode())) {
-                    performHapticFeedbackLw(null, HapticFeedbackConstants.LONG_PRESS, true);
-                    AbcUtils.toggleCameraFlash();
+                    toggleFlashLightProximityCheck();
                 }
                 break;
             case MULTI_PRESS_POWER_THEATER_MODE:
@@ -1795,6 +1875,30 @@ public class PhoneWindowManager implements WindowManagerPolicy {
     }
 
     private final ScreenshotRunnable mScreenshotRunnable = new ScreenshotRunnable();
+
+    private class ScreenrecordRunnable implements Runnable {
+        private int mMode = SCREEN_RECORD_LOW_QUALITY;
+
+        public void setMode(int mode) {
+            mMode = mode;
+        }
+
+        @Override
+        public void run() {
+            takeScreenrecord(mMode);
+        }
+    }
+
+    private final ScreenrecordRunnable mScreenrecordRunnable = new ScreenrecordRunnable();
+
+    @Override
+    public void screenRecordAction(int mode) {
+        mContext.enforceCallingOrSelfPermission(Manifest.permission.ACCESS_SURFACE_FLINGER,
+                TAG + "screenRecordAction permission denied");
+        mHandler.removeCallbacks(mScreenrecordRunnable);
+        mScreenrecordRunnable.setMode(mode);
+        mHandler.post(mScreenrecordRunnable);
+    }
 
     @Override
     public void showGlobalActions() {
@@ -2269,6 +2373,13 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                         mWindowManagerFuncs.notifyKeyguardTrustedChanged();
                     }
                 });
+
+        mProximityTimeOut = mContext.getResources().getInteger(
+                com.android.internal.R.integer.config_flashlightProximityTimeout);
+        mSensorManager = (SensorManager) mContext.getSystemService(Context.SENSOR_SERVICE);
+        mProximitySensor = mSensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
+        mProximityWakeLock = mContext.getSystemService(PowerManager.class)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ProximityWakeLock");
     }
 
     /**
@@ -5995,7 +6106,9 @@ public class PhoneWindowManager implements WindowManagerPolicy {
     }
 
     final Object mScreenshotLock = new Object();
+    final Object mScreenrecordLock = new Object();
     ServiceConnection mScreenshotConnection = null;
+    ServiceConnection mScreenrecordConnection = null;
 
     final Runnable mScreenshotTimeout = new Runnable() {
         @Override public void run() {
@@ -6004,6 +6117,17 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                     mContext.unbindService(mScreenshotConnection);
                     mScreenshotConnection = null;
                     notifyScreenshotError();
+                }
+            }
+        }
+    };
+
+    final Runnable mScreenrecordTimeout = new Runnable() {
+        @Override public void run() {
+            synchronized (mScreenrecordLock) {
+                if (mScreenrecordConnection != null) {
+                    mContext.unbindService(mScreenrecordConnection);
+                    mScreenrecordConnection = null;
                 }
             }
         }
@@ -6073,6 +6197,64 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                 if (screenshotType != WindowManager.TAKE_SCREENSHOT_SELECTED_REGION) {
                     mHandler.postDelayed(mScreenshotTimeout, 10000);
                 }
+            }
+        }
+    }
+
+    // Assume this is called from the Handler thread.
+    private void takeScreenrecord(final int mode) {
+        synchronized (mScreenrecordLock) {
+            if (mScreenrecordConnection != null) {
+                return;
+            }
+            ComponentName cn = new ComponentName("com.android.systemui",
+                    "com.android.systemui.screenrecord.TakeScreenrecordService");
+            Intent intent = new Intent();
+            intent.setComponent(cn);
+            ServiceConnection conn = new ServiceConnection() {
+                @Override
+                public void onServiceConnected(ComponentName name, IBinder service) {
+                    synchronized (mScreenrecordLock) {
+                        Messenger messenger = new Messenger(service);
+                        Message msg = Message.obtain(null, mode);
+                        final ServiceConnection myConn = this;
+                        Handler h = new Handler(mHandler.getLooper()) {
+                            @Override
+                            public void handleMessage(Message msg) {
+                                synchronized (mScreenrecordLock) {
+                                    if (mScreenrecordConnection == myConn) {
+                                        mContext.unbindService(mScreenrecordConnection);
+                                        mScreenrecordConnection = null;
+                                        mHandler.removeCallbacks(mScreenrecordTimeout);
+                                    }
+                                }
+                            }
+                        };
+                        msg.replyTo = new Messenger(h);
+                        msg.arg1 = msg.arg2 = 0;
+                        try {
+                            messenger.send(msg);
+                        } catch (RemoteException e) {
+                        }
+                    }
+                }
+                @Override
+                public void onServiceDisconnected(ComponentName name) {
+                    synchronized (mScreenrecordLock) {
+                        if (mScreenrecordConnection != null) {
+                            mContext.unbindService(mScreenrecordConnection);
+                            mScreenrecordConnection = null;
+                            mHandler.removeCallbacks(mScreenrecordTimeout);
+                        }
+                    }
+                }
+            };
+            if (mContext.bindServiceAsUser(
+                    intent, conn, Context.BIND_AUTO_CREATE, UserHandle.CURRENT)) {
+                mScreenrecordConnection = conn;
+                // Screenrecord max duration is 30 minutes. Allow 32 minutes before killing
+                // the service.
+                mHandler.postDelayed(mScreenrecordTimeout, 32 * 60 * 1000);
             }
         }
     }
@@ -6295,8 +6477,8 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                     // {@link interceptKeyBeforeDispatching()}.
                     result |= ACTION_PASS_TO_USER;
                 } else if ((result & ACTION_PASS_TO_USER) == 0) {
-                    boolean notHandledMusicControl = false;
                     if (!interactive && mVolumeMusicControl && isMusicActive()) {
+                        boolean notHandledMusicControl = false;
                         if (down) {
                             if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
                                 scheduleLongPressKeyEvent(event, KeyEvent.KEYCODE_MEDIA_PREVIOUS);
@@ -6309,22 +6491,20 @@ public class PhoneWindowManager implements WindowManagerPolicy {
                             mHandler.removeMessages(MSG_DISPATCH_VOLKEY_WITH_WAKE_LOCK);
                             notHandledMusicControl = true;
                         }
-                    }
-                    if (down || notHandledMusicControl) {
-                        KeyEvent newEvent = event;
-                        if (!down) {
-                            // Rewrite the event to use key-down if required
-                            newEvent = new KeyEvent(KeyEvent.ACTION_DOWN, keyCode);
-                        }
-                        if (mUseTvRouting) {
-                            dispatchDirectAudioEvent(newEvent);
-                        } else {
-                            // If we aren't passing to the user and no one else
-                            // handled it send it to the session manager to
-                            // figure out.
+
+                        if (notHandledMusicControl) {
+                            KeyEvent newEvent = event;
+                            if (!down) {
+                                // Rewrite the event to use key-down if required
+                                // down is enough to make the volume event handled
+                                newEvent = new KeyEvent(KeyEvent.ACTION_DOWN, keyCode);
+                            }
                             MediaSessionLegacyHelper.getHelper(mContext).sendVolumeKeyEvent(
                                     newEvent, AudioManager.USE_DEFAULT_STREAM_TYPE, true);
                         }
+                    } else {
+                        MediaSessionLegacyHelper.getHelper(mContext).sendVolumeKeyEvent(
+                                event, AudioManager.USE_DEFAULT_STREAM_TYPE, true);
                     }
                 }
                 break;
@@ -6632,6 +6812,17 @@ public class PhoneWindowManager implements WindowManagerPolicy {
             return false;
         }
 
+        IDreamManager dreamManager = getDreamManager();
+        try {
+            if (dreamManager != null && dreamManager.isDozing()) {
+                if (event != null && isVolumeKey(event)) {
+                    return false;
+                }
+            }
+        } catch (RemoteException e) {
+            Slog.e(TAG, "RemoteException when checking if dreaming", e);
+        }
+
         // Send events to keyguard while the screen is on and it's showing.
         if (isKeyguardShowingAndNotOccluded() && !displayOff) {
             return true;
@@ -6647,10 +6838,8 @@ public class PhoneWindowManager implements WindowManagerPolicy {
 
         // Send events to a dozing dream even if the screen is off since the dream
         // is in control of the state of the screen.
-        IDreamManager dreamManager = getDreamManager();
-
         try {
-            if (dreamManager != null && dreamManager.isDreaming() && !dreamManager.isDozing()) {
+            if (dreamManager != null && dreamManager.isDreaming()) {
                 return true;
             }
         } catch (RemoteException e) {
@@ -6660,6 +6849,11 @@ public class PhoneWindowManager implements WindowManagerPolicy {
         // Otherwise, consume events since the user can't see what is being
         // interacted with.
         return false;
+    }
+
+    private boolean isVolumeKey(KeyEvent event) {
+        return event.getKeyCode() == KeyEvent.KEYCODE_VOLUME_DOWN
+                || event.getKeyCode() == KeyEvent.KEYCODE_VOLUME_UP;
     }
 
     private void dispatchDirectAudioEvent(KeyEvent event) {
