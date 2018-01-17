@@ -270,6 +270,7 @@ public class NotificationPanelView extends PanelView implements
     public void setStatusBar(StatusBar bar) {
         mStatusBar = bar;
         mKeyguardBottomArea.setStatusBar(mStatusBar);
+        mKeyguardStatusView.setStatusBar(mStatusBar);
     }
 
     @Override

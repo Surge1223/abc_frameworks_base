@@ -45,6 +45,7 @@ import com.android.internal.util.ArrayUtils;
 import com.android.internal.widget.LockPatternUtils;
 import com.android.systemui.ChargingView;
 import com.android.systemui.PlayingMediaTextView;
+import com.android.systemui.statusbar.phone.StatusBar;
 import com.android.systemui.statusbar.policy.DateView;
 
 import java.util.Locale;
@@ -367,5 +368,9 @@ public class KeyguardStatusView extends GridLayout {
 
     public void setPlayingMediaText(MediaMetadata mediaMetaData) {
         mPlayingMedia.setPlayingMediaText(mediaMetaData);
+    }
+
+    public void setStatusBar(StatusBar bar) {
+        mPlayingMedia.setStatusBar(bar);
     }
 }

@@ -23,12 +23,15 @@ import android.view.View;
 import android.widget.TextView;
 
 import com.android.systemui.R;
+import com.android.systemui.statusbar.phone.StatusBar;
 
 
 public class PlayingMediaTextView extends TextView {
     private static final String TAG = "PlayingMediaTextView";
 
     private boolean mAvailable;
+
+    private StatusBar mStatusBar;
 
     public PlayingMediaTextView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -62,10 +65,17 @@ public class PlayingMediaTextView extends TextView {
                 /* considering we are in Ambient mode here, it's probably not worth it to show
                     too many infos, so let's skip album name to keep a smaller text */
                 setText(artist.toString() /*+ " - " + album.toString()*/ + " - " + title.toString());
+                if (mStatusBar != null) {
+                    mStatusBar.triggerAmbientForMedia();
+                }
             }
         } else {
             mAvailable = false;
             updateVisibility(false);
         }
+    }
+
+    public void setStatusBar(StatusBar bar) {
+        mStatusBar = bar;
     }
 }
