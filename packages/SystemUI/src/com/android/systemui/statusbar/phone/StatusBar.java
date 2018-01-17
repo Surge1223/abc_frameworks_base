@@ -642,9 +642,6 @@ public class StatusBar extends SystemUI implements DemoMode,
             if (DEBUG_MEDIA) Log.v(TAG, "DEBUG_MEDIA: onMetadataChanged: " + metadata);
             mMediaMetadata = metadata;
             updateMediaMetaData(true, true);
-            if (mTickerEnabled == 2) {
-                tickTrackInfo();
-            }
             setMediaPlaying();
         }
 
@@ -660,6 +657,7 @@ public class StatusBar extends SystemUI implements DemoMode,
                 getMediaControllerPlaybackState(mMediaController)
                 || PlaybackState.STATE_BUFFERING ==
                 getMediaControllerPlaybackState(mMediaController)) {
+            tickTrackInfo(mMediaController);
             mNoMan.setMediaPlaying(true);
             final String currentPkg = mMediaController.getPackageName().toLowerCase();
             for (String packageName : mNavMediaArrowsExcludeList) {
@@ -671,6 +669,7 @@ public class StatusBar extends SystemUI implements DemoMode,
                 mNavigationBar.setMediaPlaying(true);
             }
         } else {
+            mNotificationPanel.getKeyguardStatusView().setPlayingMediaText(null);
             mNoMan.setMediaPlaying(false);
             if (mNavigationBar != null) {
                 mNavigationBar.setMediaPlaying(false);
@@ -678,20 +677,20 @@ public class StatusBar extends SystemUI implements DemoMode,
         }
     }
 
-    private void tickTrackInfo() {
+    private void tickTrackInfo(MediaController mc) {
         ArrayList<Entry> activeNotifications = mNotificationData.getActiveNotifications();
         int N = activeNotifications.size();
-        if (PlaybackState.STATE_PLAYING ==
-                getMediaControllerPlaybackState(mMediaController)
-                || PlaybackState.STATE_BUFFERING ==
-                getMediaControllerPlaybackState(mMediaController)) {
-            final String pkg = mMediaController.getPackageName();
-            for (int i = 0; i < N; i++) {
-                final Entry entry = activeNotifications.get(i);
-                if (entry.notification.getPackageName().equals(pkg)) {
+        final String pkg = mc.getPackageName();
+        for (int i = 0; i < N; i++) {
+            final Entry entry = activeNotifications.get(i);
+            if (entry.notification.getPackageName().equals(pkg)) {
+                if (mTickerEnabled == 2) {
                     tick(entry.notification, true, true, mMediaMetadata);
-                    break;
                 }
+                //if (mAmbientMediaPlaying) {
+                    mNotificationPanel.getKeyguardStatusView().setPlayingMediaText(mMediaMetadata);
+                //}
+                break;
             }
         }
     }
@@ -2496,8 +2495,8 @@ public class StatusBar extends SystemUI implements DemoMode,
                 clearCurrentMediaNotification();
                 mMediaController = controller;
                 mMediaController.registerCallback(mMediaListener);
-                setMediaPlaying();
                 mMediaMetadata = mMediaController.getMetadata();
+                setMediaPlaying();
                 if (DEBUG_MEDIA) {
                     Log.v(TAG, "DEBUG_MEDIA: insert listener, receive metadata: "
                             + mMediaMetadata);
