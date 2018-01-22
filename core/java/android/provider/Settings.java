@@ -4224,8 +4224,9 @@ public final class Settings {
         /**
          * Force an Ambient notification when a new media track is being played
          * 0 - disabled
-         * 1 - enabled and keep showing clock and notification icons
-         * 2 - enabled and hide clock and notification icons
+         * 1 - show track info within normal Ambient Display notifications
+         * 2 - show track info within normal Ambient Display and also force new notifications when skipping tracks
+         * 3 - like 2, but for forced notifications use a clean layout with hidden clock
          * @hide
          */
         public static final String FORCE_AMBIENT_FOR_MEDIA = "force_ambient_for_media";
@@ -7635,6 +7636,12 @@ public final class Settings {
                 "system_navigation_keys_enabled";
 
         /**
+         * Wheter to dismiss notifications on fingerprint left and right swipe action
+         * @hide
+         */
+        public static final String FP_SWIPE_TO_DISMISS_NOTIFICATIONS = "fp_swipe_to_dismiss_notifications";
+
+        /**
          * Holds comma separated list of ordering of QS tiles.
          * @hide
          */
@@ -7710,6 +7717,12 @@ public final class Settings {
          * @hide
          */
         public static final String FORCE_AUTHORIZE_SUBSTRATUM_PACKAGES = "force_authorize_substratum_packages";
+
+        /**
+         * The TCP/IP port to run ADB on, or -1 for USB
+         * @hide
+         */
+        public static final String ADB_PORT = "adb_port";
 
         /**
          * This are the settings to be backed up.

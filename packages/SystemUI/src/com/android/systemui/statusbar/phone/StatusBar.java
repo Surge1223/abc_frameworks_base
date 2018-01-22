@@ -502,6 +502,8 @@ public class StatusBar extends SystemUI implements DemoMode,
     ActivityManager mAm;
     boolean mLessBoringHeadsUp;
 
+    private boolean mFpDismissNotifications;
+
     // the tracker view
     int mTrackingPosition; // the position of the top of the tracking view.
 
@@ -675,6 +677,9 @@ public class StatusBar extends SystemUI implements DemoMode,
                 mNavigationBar.setMediaPlaying(true);
             }
         } else {
+            if (mAmbientMediaPlaying != 0 && mAmbientIndicationContainer != null) {
+                ((AmbientIndicationContainer)mAmbientIndicationContainer).hideIndication();
+            }
             mNoMan.setMediaPlaying(false);
             if (mNavigationBar != null) {
                 mNavigationBar.setMediaPlaying(false);
@@ -683,7 +688,7 @@ public class StatusBar extends SystemUI implements DemoMode,
     }
 
     private void tickTrackInfo(MediaController mc) {
-        ArrayList<Entry> activeNotifications = mNotificationData.getActiveNotifications();
+        ArrayList<Entry> activeNotifications = mNotificationData.getAllNotifications();
         int N = activeNotifications.size();
         final String pkg = mc.getPackageName();
         for (int i = 0; i < N; i++) {
@@ -692,7 +697,7 @@ public class StatusBar extends SystemUI implements DemoMode,
                 if (mTickerEnabled == 2) {
                     tick(entry.notification, true, true, mMediaMetadata);
                 }
-                if (mAmbientIndicationContainer != null) {
+                if (mAmbientMediaPlaying != 0 && mAmbientIndicationContainer != null) {
                     ((AmbientIndicationContainer)mAmbientIndicationContainer).setIndication(mMediaMetadata);
                 }
                 break;
@@ -701,7 +706,7 @@ public class StatusBar extends SystemUI implements DemoMode,
     }
 
     public void triggerAmbientForMedia() {
-        if (mAmbientMediaPlaying != 0) {
+        if (mAmbientMediaPlaying == 2 || mAmbientMediaPlaying == 3) {
             mDozeServiceHost.fireNotificationMedia();
         }
     }
@@ -1587,6 +1592,10 @@ public class StatusBar extends SystemUI implements DemoMode,
     }
 
     public void clearAllNotifications() {
+        clearAllNotifications(false);
+    }
+
+    private void clearAllNotifications(boolean forceToLeft) {
 
         // animate-swipe all dismissable notifications, then animate the shade closed
         int numChildren = mStackScroller.getChildCount();
@@ -1648,11 +1657,11 @@ public class StatusBar extends SystemUI implements DemoMode,
             }
         });
 
-        performDismissAllAnimations(viewsToHide);
+        performDismissAllAnimations(viewsToHide, forceToLeft);
 
     }
 
-    private void performDismissAllAnimations(ArrayList<View> hideAnimatedList) {
+    private void performDismissAllAnimations(ArrayList<View> hideAnimatedList, boolean forceToLeft) {
         Runnable animationFinishAction = new Runnable() {
             @Override
             public void run() {
@@ -1675,7 +1684,7 @@ public class StatusBar extends SystemUI implements DemoMode,
             if (i == 0) {
                 endRunnable = animationFinishAction;
             }
-            mStackScroller.dismissViewAnimated(view, endRunnable, totalDelay, 260);
+            mStackScroller.dismissViewAnimated(view, endRunnable, totalDelay, 260, forceToLeft);
             currentDelay = Math.max(50, currentDelay - rowDelayDecrement);
             totalDelay += currentDelay;
         }
@@ -3200,6 +3209,12 @@ public class StatusBar extends SystemUI implements DemoMode,
             } else if (!mNotificationPanel.isInSettings() && !mNotificationPanel.isExpanding()){
                 mNotificationPanel.flingSettings(0 /* velocity */, true /* expand */);
                 mMetricsLogger.count(NotificationPanelView.COUNTER_PANEL_OPEN_QS, 1);
+            }
+        } else if (mFpDismissNotifications && (KeyEvent.KEYCODE_SYSTEM_NAVIGATION_LEFT == key
+                || KeyEvent.KEYCODE_SYSTEM_NAVIGATION_RIGHT == key)) {
+            if (!mNotificationPanel.isFullyCollapsed() && !mNotificationPanel.isExpanding()){
+                mMetricsLogger.action(MetricsEvent.ACTION_DISMISS_ALL_NOTES);
+                clearAllNotifications(KeyEvent.KEYCODE_SYSTEM_NAVIGATION_LEFT == key ? true : false);
             }
         }
 
@@ -5879,7 +5894,7 @@ public class StatusBar extends SystemUI implements DemoMode,
         }
         mStatusBarWindowManager.setDozing(mDozing);
         mStatusBarKeyguardViewManager.setDozing(mDozing);
-        if (mAmbientIndicationContainer instanceof DozeReceiver) {
+        if (mAmbientMediaPlaying != 0 && mAmbientIndicationContainer instanceof DozeReceiver) {
             ((DozeReceiver) mAmbientIndicationContainer).setDozing(mDozing);
         }
         updateDozingState();
@@ -5964,14 +5979,14 @@ public class StatusBar extends SystemUI implements DemoMode,
                         // Otherwise just show the always-on screen.
                         setPulsing(pulsingEntries);
                     }
-                    setForcedMediaPulse(mAmbientMediaPlaying == 2 ? reason : -1);
+                    setCleanLayout(mAmbientMediaPlaying == 3 ? reason : -1);
                 }
 
                 @Override
                 public void onPulseFinished() {
                     callback.onPulseFinished();
                     setPulsing(null);
-                    setForcedMediaPulse(-1);
+                    setCleanLayout(-1);
                 }
 
                 private void setPulsing(Collection<HeadsUpManager.HeadsUpEntry> pulsing) {
@@ -5981,11 +5996,11 @@ public class StatusBar extends SystemUI implements DemoMode,
                     mIgnoreTouchWhilePulsing = false;
                 }
 
-                private void setForcedMediaPulse(int reason) {
-                    mNotificationPanel.setForcedMediaPulse(reason);
-                    mNotificationShelf.setForcedMediaPulse(reason);
-                    if (mAmbientIndicationContainer != null) {
-                        ((AmbientIndicationContainer)mAmbientIndicationContainer).setForcedMediaPulse(reason);
+                private void setCleanLayout(int reason) {
+                    mNotificationPanel.setCleanLayout(reason);
+                    mNotificationShelf.setCleanLayout(reason);
+                    if (mAmbientMediaPlaying != 0 && mAmbientIndicationContainer != null) {
+                        ((AmbientIndicationContainer)mAmbientIndicationContainer).setCleanLayout(reason);
                     }
                 }
             }, reason);
@@ -6323,6 +6338,9 @@ public class StatusBar extends SystemUI implements DemoMode,
             resolver.registerContentObserver(Settings.System.getUriFor(
                     Settings.System.FORCE_AMBIENT_FOR_MEDIA),
                     false, this, UserHandle.USER_ALL);
+            resolver.registerContentObserver(Settings.Secure.getUriFor(
+                    Settings.Secure.FP_SWIPE_TO_DISMISS_NOTIFICATIONS),
+                    false, this, UserHandle.USER_ALL);
         }
 
         @Override
@@ -6368,6 +6386,9 @@ public class StatusBar extends SystemUI implements DemoMode,
             } else if (uri.equals(Settings.System.getUriFor(
                     Settings.System.FORCE_AMBIENT_FOR_MEDIA))) {
                 setForceAmbient();
+            } else if (uri.equals(Settings.Secure.getUriFor(
+                    Settings.Secure.FP_SWIPE_TO_DISMISS_NOTIFICATIONS))) {
+                setFpToDismissNotifications();
             }
         }
 
@@ -6381,6 +6402,7 @@ public class StatusBar extends SystemUI implements DemoMode,
             updateRecentsIconPack();
             updateRecentsMode();
             setForceAmbient();
+            setFpToDismissNotifications();
         }
     }
 
@@ -6462,6 +6484,15 @@ public class StatusBar extends SystemUI implements DemoMode,
         mAmbientMediaPlaying = Settings.System.getIntForUser(mContext.getContentResolver(),
                 Settings.System.FORCE_AMBIENT_FOR_MEDIA, 0,
                 UserHandle.USER_CURRENT);
+        if (mAmbientMediaPlaying != 0 && mAmbientIndicationContainer != null) {
+            ((AmbientIndicationContainer)mAmbientIndicationContainer).setIndication(mMediaMetadata);
+        }
+    }
+
+    private void setFpToDismissNotifications() {
+        mFpDismissNotifications = Settings.Secure.getIntForUser(mContext.getContentResolver(),
+                Settings.Secure.FP_SWIPE_TO_DISMISS_NOTIFICATIONS, 0,
+                UserHandle.USER_CURRENT) == 1;
     }
 
     protected final ContentObserver mNavbarObserver = new ContentObserver(mHandler) {
