@@ -246,7 +246,6 @@ import com.android.internal.policy.IKeyguardDismissCallback;
 import com.android.internal.policy.IShortcutService;
 import com.android.internal.policy.PhoneWindow;
 import com.android.internal.statusbar.IStatusBarService;
-import com.android.internal.util.abc.AbcUtils;
 import com.android.internal.util.ScreenShapeHelper;
 import com.android.internal.util.abc.AbcUtils;
 import com.android.internal.utils.du.ActionHandler;
@@ -1702,7 +1701,8 @@ public class PhoneWindowManager implements WindowManagerPolicy {
             break;
         case LONG_PRESS_POWER_GLOBAL_ACTIONS:
             mPowerKeyHandled = true;
-            if (isKeyguardShowingAndNotOccluded() && isKeyguardSecure(mCurrentUserId)) {
+            if (!(isKeyguardShowingAndNotOccluded() && isKeyguardSecure(mCurrentUserId) &&
+                    mGlobalActionsOnLockDisable)) {
                 performHapticFeedbackLw(null, HapticFeedbackConstants.LONG_PRESS, false);
             }
             showGlobalActionsInternal();

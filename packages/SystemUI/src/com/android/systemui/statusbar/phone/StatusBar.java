@@ -679,7 +679,7 @@ public class StatusBar extends SystemUI implements DemoMode,
                 mNavigationBar.setMediaPlaying(true);
             }
         } else {
-            if (mAmbientMediaPlaying != 0 && mAmbientIndicationContainer != null) {
+            if (isAmbientContainerAvailable()) {
                 ((AmbientIndicationContainer)mAmbientIndicationContainer).hideIndication();
             }
             mNoMan.setMediaPlaying(false);
@@ -699,7 +699,7 @@ public class StatusBar extends SystemUI implements DemoMode,
                 if (mTickerEnabled == 2) {
                     tick(entry.notification, true, true, mMediaMetadata);
                 }
-                if (mAmbientMediaPlaying != 0 && mAmbientIndicationContainer != null) {
+                if (isAmbientContainerAvailable()) {
                     ((AmbientIndicationContainer)mAmbientIndicationContainer).setIndication(mMediaMetadata);
                 }
                 // NotificationInflater calls async MediaNotificationProcessoron to create notification
@@ -1240,7 +1240,7 @@ public class StatusBar extends SystemUI implements DemoMode,
         mAmbientIndicationContainer = mStatusBarWindow.findViewById(
                 R.id.ambient_indication_container);
         if (mAmbientIndicationContainer != null) {
-            ((AmbientIndicationContainer) mAmbientIndicationContainer).initializeView(this);
+            ((AmbientIndicationContainer) mAmbientIndicationContainer).initializeView(this, mHandler);
         }
 
         // set the initial view visibility
@@ -3100,12 +3100,26 @@ public class StatusBar extends SystemUI implements DemoMode,
     public boolean isUsingDarkTheme() {
         OverlayInfo themeInfo = null;
         try {
-            themeInfo = mOverlayManager.getOverlayInfo("com.android.systemui.theme.dark",
+            themeInfo = mOverlayManager.getOverlayInfo("com.android.system.theme.dark",
                     mCurrentUserId);
         } catch (RemoteException e) {
             e.printStackTrace();
         }
         return themeInfo != null && themeInfo.isEnabled();
+    }
+
+    public void unloadStockDarkTheme() {
+        OverlayInfo themeInfo = null;
+        try {
+            themeInfo = mOverlayManager.getOverlayInfo("com.android.systemui.theme.dark",
+                    mCurrentUserId);
+            if (themeInfo != null && themeInfo.isEnabled()) {
+                mOverlayManager.setEnabled("com.android.systemui.theme.dark",
+                        false /*disable*/, mCurrentUserId);
+            }
+        } catch (RemoteException e) {
+            e.printStackTrace();
+        }
     }
 
     @Nullable
@@ -5107,8 +5121,15 @@ public class StatusBar extends SystemUI implements DemoMode,
         }
         if (isUsingDarkTheme() != useDarkTheme) {
             try {
-                mOverlayManager.setEnabled("com.android.systemui.theme.dark",
+                mOverlayManager.setEnabled("com.android.system.theme.dark",
                         useDarkTheme, mCurrentUserId);
+                mOverlayManager.setEnabled("com.android.settings.theme.dark",
+                        useDarkTheme, mCurrentUserId);
+                mOverlayManager.setEnabled("com.android.dui.theme.dark",
+                        useDarkTheme, mCurrentUserId);
+                if (useDarkTheme) {
+                    unloadStockDarkTheme();
+                }
             } catch (RemoteException e) {
                 Log.w(TAG, "Can't change theme", e);
             }
@@ -5993,6 +6014,9 @@ public class StatusBar extends SystemUI implements DemoMode,
                         setPulsing(pulsingEntries);
                     }
                     setCleanLayout(mAmbientMediaPlaying == 3 ? reason : -1);
+                    if (isAmbientContainerAvailable()) {
+                        ((AmbientIndicationContainer)mAmbientIndicationContainer).setTickerMarquee(true);
+                    }
                 }
 
                 @Override
@@ -6000,6 +6024,9 @@ public class StatusBar extends SystemUI implements DemoMode,
                     callback.onPulseFinished();
                     setPulsing(null);
                     setCleanLayout(-1);
+                    if (isAmbientContainerAvailable()) {
+                        ((AmbientIndicationContainer)mAmbientIndicationContainer).setTickerMarquee(false);
+                    }
                 }
 
                 private void setPulsing(Collection<HeadsUpManager.HeadsUpEntry> pulsing) {
@@ -6012,7 +6039,7 @@ public class StatusBar extends SystemUI implements DemoMode,
                 private void setCleanLayout(int reason) {
                     mNotificationPanel.setCleanLayout(reason);
                     mNotificationShelf.setCleanLayout(reason);
-                    if (mAmbientMediaPlaying != 0 && mAmbientIndicationContainer != null) {
+                    if (isAmbientContainerAvailable()) {
                         ((AmbientIndicationContainer)mAmbientIndicationContainer).setCleanLayout(reason);
                     }
                 }
@@ -6497,9 +6524,13 @@ public class StatusBar extends SystemUI implements DemoMode,
         mAmbientMediaPlaying = Settings.System.getIntForUser(mContext.getContentResolver(),
                 Settings.System.FORCE_AMBIENT_FOR_MEDIA, 0,
                 UserHandle.USER_CURRENT);
-        if (mAmbientMediaPlaying != 0 && mAmbientIndicationContainer != null) {
+        if (isAmbientContainerAvailable()) {
             ((AmbientIndicationContainer)mAmbientIndicationContainer).setIndication(mMediaMetadata);
         }
+    }
+
+    private boolean isAmbientContainerAvailable() {
+        return mAmbientMediaPlaying != 0 && mAmbientIndicationContainer != null;
     }
 
     private void setFpToDismissNotifications() {

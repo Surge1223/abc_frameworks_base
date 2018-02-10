@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-Copyright (C) 2017 The Android Open Source Project
+Copyright (C) 2018 The ABC ROM
 
    Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -15,11 +15,11 @@ Copyright (C) 2017 The Android Open Source Project
     limitations under the License.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="36dp"
-    android:height="36dp"
-    android:viewportWidth="25"
-    android:viewportHeight="25">
+    android:width="32dp"
+    android:height="32dp"
+    android:viewportWidth="32"
+    android:viewportHeight="32">
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M19,7h-8v6h8L19,7zM21,3L3,3c-1.1,0 -2,0.9 -2,2v14c0,1.1 0.9,1.98 2,1.98h18c1.1,0 2,-0.88 2,-1.98L23,5c0,-1.1 -0.9,-2 -2,-2zM21,19.01L3,19.01L3,4.98h18v14.03z"/>
+        android:pathData="M 15.999998,1.7505529 H 27.39821 V 7.4496581 H 18.851239 V 23.124722 c 0,3.93266 -3.192067,7.124728 -7.124723,7.124725 -3.9326582,0 -7.1247245,-3.192065 -7.124726,-7.124725 C 4.6017916,19.192066 7.7938586,16 11.726516,16 13.350872,16 14.803106,16.540661 16,17.452581 Z"/>
 </vector>
