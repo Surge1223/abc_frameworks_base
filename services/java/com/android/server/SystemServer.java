@@ -26,6 +26,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.content.res.Resources.Theme;
+import android.content.substratum.ISubstratumService;
 import android.database.ContentObserver;
 import android.os.BaseBundle;
 import android.os.Binder;

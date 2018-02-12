@@ -48,6 +48,7 @@ import android.os.UserHandle;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.Log;
+import android.util.Slog;
 
 import com.android.internal.substratum.ISubstratumHelperService;
 import com.android.server.SystemService;
@@ -67,9 +68,36 @@ import java.util.zip.ZipInputStream;
 
 public final class SubstratumService extends SystemService {
 
+    private final Context mContext;
     private static final String TAG = "SubstratumService";
     private static final String SUBSTRATUM_PACKAGE = "projekt.substratum";
-    private static final boolean DEBUG = false;
+    private static final boolean DEBUG = true;
+    private IOverlayManager mOm;
+    private IPackageManager mPm;
+    private boolean mIsWaiting;
+    private String mInstalledPackageName;
+    private final Object mLock = new Object();
+    private ISubstratumHelperService mHelperService;
+
+    public SubstratumService(@NonNull final Context context) {
+        super(context);
+        if (DEBUG) {
+           Slog.d(TAG, "Starting...");
+       }
+       mContext = context;
+
+        publishBinderService(context.SUBSTRATUM_SERVICE, mService);
+        publishLocalService(SubstratumService.class, this);
+    }
+
+    @Override
+    public void onStart() {
+       if (DEBUG) {
+           Slog.d(TAG, "Substratum Service:  is lit af");
+       }
+      // TODO: Add native run code here
+    }
+
 
     private static final Signature SUBSTRATUM_SIGNATURE = new Signature(""
             + "308202eb308201d3a003020102020411c02f2f300d06092a864886f70d01010b050030263124302206"
@@ -144,15 +172,7 @@ public final class SubstratumService extends SystemService {
                 "ringtone", "ringtone", RingtoneManager.TYPE_RINGTONE)
     );
 
-    private IOverlayManager mOm;
-    private IPackageManager mPm;
-    private boolean mIsWaiting;
-    private String mInstalledPackageName;
 
-    private Context mContext;
-    private final Object mLock = new Object();
-
-    private ISubstratumHelperService mHelperService;
     private final ServiceConnection mHelperConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
@@ -166,11 +186,6 @@ public final class SubstratumService extends SystemService {
             log("Helper service disconnected");
         }
     };
-
-    public SubstratumService(@NonNull final Context context) {
-        super(context);
-        mContext = context;
-    }
 
     @Override
     public void onBootPhase(int phase) {
@@ -187,11 +202,6 @@ public final class SubstratumService extends SystemService {
                 Log.e(TAG, "published substratum service");
             }
         }
-    }
-
-    @Override
-    public void onStart() {
-        // Intentionally left empty.
     }
 
     @Override
