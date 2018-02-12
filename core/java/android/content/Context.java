@@ -4031,6 +4031,16 @@ public abstract class Context {
     public static final String OVERLAY_SERVICE = "overlay";
 
     /**
+     * Use with {@link #getSystemService} to retrieve a {@link
+     * android.content.subsratum.SubstratumService } for managing overlay packages.
+     *
+     * @see #getSystemService
+     * @see android.content.subsratum.SubstratumService
+     * @hide
+     */
+   public static final String SUBSTRATUM_SERVICE = "subtratum";
+
+   /**
      * Use with {@link #getSystemService} to retrieve a
      * {@link VrManager} for accessing the VR service.
      *
