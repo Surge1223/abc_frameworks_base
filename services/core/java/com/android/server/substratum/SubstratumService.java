@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2017 The Android Open Source Project
+ * Copyright (C) 2018 Projekt Development
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +18,7 @@
 package com.android.server.substratum;
 
 import android.annotation.NonNull;
+import android.app.AppGlobals;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -33,12 +35,15 @@ import android.content.pm.Signature;
 import android.content.res.AssetManager;
 import android.content.ServiceConnection;
 import android.content.substratum.ISubstratumService;
+import android.database.ContentObserver;
 import android.graphics.Typeface;
 import android.media.RingtoneManager;
+import android.net.Uri;
 import android.os.Binder;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.FileUtils;
+import android.os.Handler;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.os.SELinux;
@@ -59,10 +64,12 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.lang.Throwable;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -71,12 +78,14 @@ public final class SubstratumService extends SystemService {
     private final Context mContext;
     private static final String TAG = "SubstratumService";
     private static final String SUBSTRATUM_PACKAGE = "projekt.substratum";
-    private static final boolean DEBUG = true;
+    private static final boolean DEBUG = false;
     private IOverlayManager mOm;
     private IPackageManager mPm;
     private boolean mIsWaiting;
     private String mInstalledPackageName;
     private final Object mLock = new Object();
+    private boolean mSigOverride = false;
+    private SettingsObserver mObserver = new SettingsObserver();
     private ISubstratumHelperService mHelperService;
 
     public SubstratumService(@NonNull final Context context) {
@@ -120,7 +129,7 @@ public final class SubstratumService extends SystemService {
             + "19fa49201bb5b5aadeee8f2f096ac029055713b77054e8af07cd61fe97f7365d0aa92d570be98acb89"
             + "41b8a2b0053b54f18bfde092eb");
 
-    private static final Signature SUBSTRATUM_CI_SIGNATURE = new Signature(""
+    private static final Signature SUBSTRATUSubstratumServiceM_CI_SIGNATURE = new Signature(""
             + "308201dd30820146020101300d06092a864886f70d010105050030373116301406035504030c0d416e"
             + "64726f69642044656275673110300e060355040a0c07416e64726f6964310b30090603550406130255"
             + "53301e170d3137303232333036303730325a170d3437303231363036303730325a3037311630140603"
@@ -194,19 +203,22 @@ public final class SubstratumService extends SystemService {
                 restoreconThemeDir();
             }
 
+            mContext.getContentResolver().registerContentObserver(
+                    Settings.Secure.getUriFor(Settings.Secure.FORCE_AUTHORIZE_SUBSTRATUM_PACKAGES),
+                    false, mObserver);
+            updateSettings();
+
             mOm = IOverlayManager.Stub.asInterface(ServiceManager.getService("overlay"));
-            mPm = IPackageManager.Stub.asInterface(ServiceManager.getService("package"));
+            mPm = AppGlobals.getPackageManager();
             publishBinderService("substratum", mService);
 
-            if (DEBUG) {
-                Log.e(TAG, "published substratum service");
-            }
+            log("published substratum service");
         }
     }
 
     @Override
     public void onSwitchUser(final int newUserId) {
-        // Intentionally left empty.
+        // Intentionally left empty
     }
 
     private void waitForHelperConnection() {
@@ -216,12 +228,6 @@ public final class SubstratumService extends SystemService {
             mContext.bindServiceAsUser(intent, mHelperConnection,
                     Context.BIND_AUTO_CREATE, UserHandle.SYSTEM);
         }
-    }
-
-    private boolean forceAuthorizePackages() {
-        return Settings.Secure.getIntForUser(mContext.getContentResolver(),
-                Settings.Secure.FORCE_AUTHORIZE_SUBSTRATUM_PACKAGES,
-                0, UserHandle.USER_CURRENT) == 1;
     }
 
     private boolean doSignaturesMatch(String packageName, Signature signature) {
@@ -252,12 +258,12 @@ public final class SubstratumService extends SystemService {
         if (TextUtils.equals(callingPackage, SUBSTRATUM_PACKAGE)) {
             for (Signature sig : AUTHORIZED_SIGNATURES) {
                 if (doSignaturesMatch(callingPackage, sig)) {
-                return;
+                    return;
                 }
             }
         }
 
-       if (forceAuthorizePackages()) {
+       if (mSigOverride) {
             log("\'" + callingPackage + "\' is not an authorized calling package, but the user " +
                     "has explicitly allowed all calling packages, " +
                     "validating calling package permissions...");
@@ -282,30 +288,39 @@ public final class SubstratumService extends SystemService {
                     PackageDeleteObserver deleteObserver = new PackageDeleteObserver();
                     for (String path : paths) {
                         mInstalledPackageName = null;
-                        File apkFile = new File(path);
-                        if (apkFile.exists()) {
-                            log("Installer - installing package from path \'" + path + "\'");
-                            mIsWaiting = true;
-                            Settings.Global.putInt(mContext.getContentResolver(),
-                                    Settings.Global.PACKAGE_VERIFIER_ENABLE, 0);
+                        log("Installer - installing package from path \'" + path + "\'");
+                        mIsWaiting = true;
+                        Settings.Global.putInt(mContext.getContentResolver(),
+                                Settings.Global.PACKAGE_VERIFIER_ENABLE, 0);
+                        try {
                             mPm.installPackageAsUser(
                                     path,
                                     installObserver,
                                     PackageManager.INSTALL_REPLACE_EXISTING,
                                     null,
                                     UserHandle.USER_SYSTEM);
-                            while (mIsWaiting) {
-                                Thread.sleep(1);
-                            }
 
-                            if (mInstalledPackageName != null) {
+                            while (mIsWaiting) {
+                                try {
+                                    Thread.sleep(1);
+                                } catch (InterruptedException e) {
+                                    // Someone interrupted my sleep, ugh!
+                                }
+                            }
+                        } catch (RemoteException e) {
+                            logE("There is an exception when trying to install " + path, e);
+                            continue;
+                        }
+
+                        if (mInstalledPackageName != null) {
+                            try {
                                 PackageInfo pi = mPm.getPackageInfo(mInstalledPackageName,
                                         0, UserHandle.USER_SYSTEM);
                                 if ((pi.applicationInfo.flags & ApplicationInfo.FLAG_HAS_CODE) != 0 ||
                                         pi.overlayTarget == null) {
                                     mIsWaiting = true;
-                                    int versionCode = mPm
-                                            .getPackageInfo(mInstalledPackageName, 0, UserHandle.USER_SYSTEM)
+                                    int versionCode = mPm.getPackageInfo(
+                                            mInstalledPackageName, 0, UserHandle.USER_SYSTEM)
                                             .versionCode;
                                     mPm.deletePackageAsUser(
                                             mInstalledPackageName,
@@ -313,16 +328,21 @@ public final class SubstratumService extends SystemService {
                                             deleteObserver,
                                             0,
                                             UserHandle.USER_SYSTEM);
+
                                     while (mIsWaiting) {
-                                        Thread.sleep(1);
+                                        try {
+                                            Thread.sleep(1);
+                                        } catch (InterruptedException e) {
+                                            // Someone interrupted my sleep, ugh!
+                                        }
                                     }
                                 }
+                            } catch (RemoteException e) {
+                                // Probably won't happen but we need to keep quiet here
                             }
                         }
                     }
                 }
-            } catch (Exception e) {
-                logE("There is an exception when trying to install package", e);
             } finally {
                 Settings.Global.putInt(mContext.getContentResolver(),
                         Settings.Global.PACKAGE_VERIFIER_ENABLE, packageVerifierEnable);
@@ -343,29 +363,35 @@ public final class SubstratumService extends SystemService {
                             switchOverlayState(p, false);
                         }
 
-                        PackageInfo pi = mPm
-                                .getPackageInfo(p, 0, UserHandle.USER_SYSTEM);
-                        if ((pi.applicationInfo.flags & ApplicationInfo.FLAG_HAS_CODE) == 0 &&
-                                pi.overlayTarget != null) {
-                            log("Remover - uninstalling \'" + p + "\'...");
-                            mIsWaiting = true;
-                            mPm.deletePackageAsUser(
-                                    p,
-                                    pi.versionCode,
-                                    observer,
-                                    0,
-                                    UserHandle.USER_SYSTEM);
-                            while (mIsWaiting) {
-                                Thread.sleep(1);
+                        try {
+                            PackageInfo pi = mPm.getPackageInfo(p, 0, UserHandle.USER_SYSTEM);
+                            if ((pi.applicationInfo.flags & ApplicationInfo.FLAG_HAS_CODE) == 0 &&
+                                    pi.overlayTarget != null) {
+                                log("Remover - uninstalling \'" + p + "\'...");
+                                mIsWaiting = true;
+                                mPm.deletePackageAsUser(
+                                        p,
+                                        pi.versionCode,
+                                        observer,
+                                        0,
+                                        UserHandle.USER_SYSTEM);
+
+                                while (mIsWaiting) {
+                                    try {
+                                        Thread.sleep(1);
+                                    } catch (InterruptedException e) {
+                                        // Someone interrupted my sleep, ugh!
+                                    }
+                                }
                             }
+                        } catch (RemoteException e) {
+                            logE("There is an exception when trying to uninstall package", e);
                         }
                     }
                     if (restartUi) {
                         restartUi();
                     }
                 }
-            } catch (Exception e) {
-                logE("There is an exception when trying to uninstall package", e);
             } finally {
                 Binder.restoreCallingIdentity(ident);
             }
@@ -612,6 +638,17 @@ public final class SubstratumService extends SystemService {
                 Binder.restoreCallingIdentity(ident);
             }
         }
+
+        @Override
+        public Map getAllOverlays(int uid) {
+            checkCallerAuthorization(Binder.getCallingUid());
+            try {
+                return mOm.getAllOverlays(uid);
+            } catch (RemoteException e) {
+                logE("There is an exception when trying to get all overlays", e);
+                return null;
+            }
+        }
     };
 
     private Context getAppContext(String packageName) {
@@ -658,21 +695,17 @@ public final class SubstratumService extends SystemService {
         try {
             waitForHelperConnection();
             mHelperService.applyBootAnimation();
-        } catch (Exception e) {
+        } catch (RemoteException e) {
             logE("There is an exception when trying to apply boot animation", e);
         }
     }
 
     private void clearBootAnimation() {
-        try {
-            if (SYSTEM_THEME_BOOTANIMATION_DIR.exists()) {
-                boolean deleted = SYSTEM_THEME_BOOTANIMATION_DIR.delete();
-                if (!deleted) {
-                    logE("Could not delete themed boot animation");
-                }
+        if (SYSTEM_THEME_BOOTANIMATION_DIR.exists()) {
+            boolean deleted = SYSTEM_THEME_BOOTANIMATION_DIR.delete();
+            if (!deleted) {
+                logE("Could not delete themed boot animation");
             }
-        } catch (Exception e) {
-            logE("There is an exception when trying to delete themed boot animation", e);
         }
     }
 
@@ -680,21 +713,17 @@ public final class SubstratumService extends SystemService {
         try {
             waitForHelperConnection();
             mHelperService.applyShutdownAnimation();
-        } catch (Exception e) {
+        } catch (RemoteException e) {
             logE("There is an exception when trying to apply shutdown animation", e);
         }
     }
 
     private void clearShutdownAnimation() {
-        try {
-            if (SYSTEM_THEME_SHUTDOWNANIMATION_DIR.exists()) {
-                boolean deleted = SYSTEM_THEME_SHUTDOWNANIMATION_DIR.delete();
-                if (!deleted) {
-                    logE("Could not delete themed shutdown animation");
-                }
+        if (SYSTEM_THEME_SHUTDOWNANIMATION_DIR.exists()) {
+            boolean deleted = SYSTEM_THEME_SHUTDOWNANIMATION_DIR.delete();
+            if (!deleted) {
+                logE("Could not delete themed shutdown animation");
             }
-        } catch (Exception e) {
-            logE("There is an exception when trying to delete themed shutdown animation", e);
         }
     }
 
@@ -728,7 +757,7 @@ public final class SubstratumService extends SystemService {
         File fontZip = new File(cacheDir, zipFileName);
         try (InputStream inputStream = am.open("fonts/" + zipFileName)) {
             FileUtils.copyToFile(inputStream, fontZip);
-        } catch (Exception e) {
+        } catch (IOException e) {
             logE("There is an exception when trying to copy themed fonts", e);
         }
 
@@ -740,16 +769,11 @@ public final class SubstratumService extends SystemService {
             logE("Could not delete ZIP file");
         }
 
-        // Check if theme zip included a fonts.xml. If not, Substratum
-        // is kind enough to provide one for us in it's assets
-        File testConfig = new File(cacheDir, "fonts.xml");
-        if (!testConfig.exists()) {
-            AssetManager subsAm = getAppContext(SUBSTRATUM_PACKAGE).getAssets();
-            try (InputStream inputStream = subsAm.open("fonts.xml")) {
-                FileUtils.copyToFile(inputStream, testConfig);
-            } catch (Exception e) {
-                logE("There is an exception when trying to extract default fonts config", e);
-            }
+        // Check if theme zip included a fonts.xml. If not, get from existing file in /system
+        File srcConfig = new File("/system/etc/fonts.xml");
+        File dstConfig = new File(cacheDir, "fonts.xml");
+        if (!dstConfig.exists()) {
+            FileUtils.copyFile(srcConfig, dstConfig);
         }
 
         // Prepare system theme fonts folder and copy new fonts folder from our cache
@@ -813,7 +837,7 @@ public final class SubstratumService extends SystemService {
         File soundsZip = new File(cacheDir, zipFileName);
         try (InputStream inputStream = am.open("audio/" + zipFileName)) {
             FileUtils.copyToFile(inputStream, soundsZip);
-        } catch (Exception e) {
+        } catch (IOException e) {
             logE("There is an exception when trying to copy themed sounds", e);
         }
 
@@ -947,7 +971,7 @@ public final class SubstratumService extends SystemService {
                     }
                 }
             }
-        } catch (Exception e) {
+        } catch (IOException e) {
             logE("There is an exception when trying to unzip", e);
         }
     }
@@ -1034,6 +1058,14 @@ public final class SubstratumService extends SystemService {
         logE(msg, null);
     }
 
+    private void updateSettings() {
+        synchronized (mLock) {
+            mSigOverride = Settings.Secure.getIntForUser(mContext.getContentResolver(),
+                    Settings.Secure.FORCE_AUTHORIZE_SUBSTRATUM_PACKAGES, 0,
+                    UserHandle.USER_CURRENT) == 1;
+        }
+    }
+
     private static class Sound {
         String themePath;
         String cachePath;
@@ -1056,6 +1088,17 @@ public final class SubstratumService extends SystemService {
             this.type = type;
         }
     }
+
+    private class SettingsObserver extends ContentObserver {
+        public SettingsObserver() {
+            super(new Handler());
+        }
+
+        @Override
+        public void onChange(boolean selfChange, Uri uri) {
+            updateSettings();
+        }
+    };
 
     private class PackageInstallObserver extends IPackageInstallObserver2.Stub {
         @Override
