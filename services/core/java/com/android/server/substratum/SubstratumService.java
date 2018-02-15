@@ -129,7 +129,7 @@ public final class SubstratumService extends SystemService {
             + "19fa49201bb5b5aadeee8f2f096ac029055713b77054e8af07cd61fe97f7365d0aa92d570be98acb89"
             + "41b8a2b0053b54f18bfde092eb");
 
-    private static final Signature SUBSTRATUSubstratumServiceM_CI_SIGNATURE = new Signature(""
+    private static final Signature SUBSTRATUM_CI_SIGNATURE = new Signature(""
             + "308201dd30820146020101300d06092a864886f70d010105050030373116301406035504030c0d416e"
             + "64726f69642044656275673110300e060355040a0c07416e64726f6964310b30090603550406130255"
             + "53301e170d3137303232333036303730325a170d3437303231363036303730325a3037311630140603"
