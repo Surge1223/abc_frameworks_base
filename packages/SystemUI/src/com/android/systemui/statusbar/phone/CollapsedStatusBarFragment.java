@@ -132,6 +132,9 @@ public class CollapsedStatusBarFragment extends Fragment implements CommandQueue
             mContentResolver.registerContentObserver(Settings.System.getUriFor(
                     Settings.System.STATUSBAR_CLOCK_DATE_FORMAT),
                     false, this, UserHandle.USER_ALL);
+            mContentResolver.registerContentObserver(Settings.System.getUriFor(
+                    Settings.System.STATUSBAR_CLOCK_DATE_POSITION),
+                    false, this, UserHandle.USER_ALL);
         }
 
         @Override
@@ -142,6 +145,8 @@ public class CollapsedStatusBarFragment extends Fragment implements CommandQueue
             initTickerView();
             ((Clock)mClock).updateSettings();
             ((Clock)mLeftClock).updateSettings();
+
+            mStatusBarComponent.updateBatterySettings();
         }
     }
 
