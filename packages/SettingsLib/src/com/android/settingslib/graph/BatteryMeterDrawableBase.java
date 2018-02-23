@@ -164,10 +164,14 @@ public class BatteryMeterDrawableBase extends Drawable {
         mPlusPaint = new Paint(mBoltPaint);
         mPlusPoints = loadPoints(res, R.array.batterymeter_plus_points);
 
-        mPathEffect = new DashPathEffect(new float[]{3,2},0);
+        mPathEffect = new DashPathEffect(new float[]{3,2}, 0);
 
         mIntrinsicWidth = context.getResources().getDimensionPixelSize(R.dimen.battery_width);
         mIntrinsicHeight = context.getResources().getDimensionPixelSize(R.dimen.battery_height);
+    }
+
+    public void setDashEffect(float[] intervals, float phase) {
+        mPathEffect = new DashPathEffect(intervals, phase);
     }
 
     @Override
@@ -254,6 +258,9 @@ public class BatteryMeterDrawableBase extends Drawable {
 
         mHeight = (bounds.bottom - mPadding.bottom) - (bounds.top + mPadding.top);
         mWidth = (bounds.right - mPadding.right) - (bounds.left + mPadding.left);
+
+        mWarningTextPaint.setTextSize(mHeight * 0.75f);
+        mWarningTextHeight = -mWarningTextPaint.getFontMetrics().ascent;
 
         switch (mMeterStyle) {
             case BATTERY_STYLE_PORTRAIT:
