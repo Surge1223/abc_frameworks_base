@@ -177,12 +177,9 @@ public final class SubstratumService extends SystemService {
     );
 
 
-    private Context mContext;
-    private final Object mLock = new Object();
     private boolean mSigOverride = false;
     private SettingsObserver mObserver = new SettingsObserver();
 
-    private ISubstratumHelperService mHelperService;
     private final ServiceConnection mHelperConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
