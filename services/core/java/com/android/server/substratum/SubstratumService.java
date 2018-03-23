@@ -77,7 +77,7 @@ public final class SubstratumService extends SystemService {
     private final Context mContext;
     private static final String TAG = "SubstratumService";
     private static final String SUBSTRATUM_PACKAGE = "projekt.substratum";
-    private static final boolean DEBUG = true;
+    private static final boolean DEBUG = false;
     private IOverlayManager mOm;
     private IPackageManager mPm;
     private boolean mIsWaiting;
@@ -176,7 +176,6 @@ public final class SubstratumService extends SystemService {
                 "ringtone", "ringtone", RingtoneManager.TYPE_RINGTONE)
     );
 
-
     private boolean mSigOverride = false;
     private SettingsObserver mObserver = new SettingsObserver();
 
@@ -193,6 +192,7 @@ public final class SubstratumService extends SystemService {
             log("Helper service disconnected");
         }
     };
+
 
     @Override
     public void onBootPhase(int phase) {
