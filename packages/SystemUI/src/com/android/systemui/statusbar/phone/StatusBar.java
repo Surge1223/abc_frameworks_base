@@ -1486,6 +1486,30 @@ public class StatusBar extends SystemUI implements DemoMode,
         reevaluateStyles();
     }
 
+    @Override
+    public void onOverlayChanged() {
+        reinflateViews();
+        updateNotificationsOnOverlayChanged();
+        mStackScroller.onOverlayChanged();
+        mNotificationShelf.onOverlayChanged();
+        mNotificationPanel.onOverlayChanged();
+        Dependency.get(DarkIconDispatcher.class).onOverlayChanged(mContext);
+    }
+
+    private void updateNotificationsOnOverlayChanged() {
+        ArrayList<Entry> activeNotifications = mNotificationData.getActiveNotifications();
+        for (int i = 0; i < activeNotifications.size(); i++) {
+            Entry entry = activeNotifications.get(i);
+            boolean exposedGuts = mNotificationGutsExposed != null
+                    && entry.row.getGuts() == mNotificationGutsExposed;
+            entry.row.onOverlayChanged();
+            if (exposedGuts) {
+                mNotificationGutsExposed = entry.row.getGuts();
+                bindGuts(entry.row, mGutsMenuItem);
+            }
+        }
+    }
+
     private void reinflateViews() {
         reevaluateStyles();
 
@@ -1559,6 +1583,7 @@ public class StatusBar extends SystemUI implements DemoMode,
                                 R.dimen.signal_cluster_margin_start),
                         0, 0, 0);
                 newCluster.setLayoutParams(layoutParams);
+                newCluster.setIsKeyguard(true);
                 viewParent.addView(newCluster, index);
                 return newCluster;
             }
@@ -6318,9 +6343,6 @@ public class StatusBar extends SystemUI implements DemoMode,
         void observe() {
             ContentResolver resolver = mContext.getContentResolver();
             resolver.registerContentObserver(Settings.System.getUriFor(
-                    Settings.System.LAST_DOZE_AUTO_BRIGHTNESS),
-                    false, this, UserHandle.USER_ALL);
-            resolver.registerContentObserver(Settings.System.getUriFor(
                     Settings.System.DOUBLE_TAP_SLEEP_LOCKSCREEN),
                     false, this, UserHandle.USER_ALL);
             resolver.registerContentObserver(Settings.System.getUriFor(
@@ -6382,9 +6404,6 @@ public class StatusBar extends SystemUI implements DemoMode,
         @Override
         public void onChange(boolean selfChange, Uri uri) {
             if (uri.equals(Settings.System.getUriFor(
-                    Settings.System.LAST_DOZE_AUTO_BRIGHTNESS))) {
-                updateDozeBrightness();
-            } else if (uri.equals(Settings.System.getUriFor(
                     Settings.System.DOUBLE_TAP_SLEEP_LOCKSCREEN))) {
                 setStatusBarWindowViewOptions();
             } else if (uri.equals(Settings.System.getUriFor(
@@ -6440,7 +6459,6 @@ public class StatusBar extends SystemUI implements DemoMode,
         }
 
         public void update() {
-            updateDozeBrightness();
             setStatusBarWindowViewOptions();
             setLockscreenMediaMetadata();
             setQsPanelOptions();
@@ -6469,15 +6487,6 @@ public class StatusBar extends SystemUI implements DemoMode,
         if (mQuickStatusBarHeader != null) {
             mQuickStatusBarHeader.updateQsbhClock();
         }
-    }
-
-    private void updateDozeBrightness() {
-        int defaultDozeBrightness = mContext.getResources().getInteger(
-                com.android.internal.R.integer.config_screenBrightnessDoze);
-        int lastValue = Settings.System.getIntForUser(mContext.getContentResolver(),
-                Settings.System.LAST_DOZE_AUTO_BRIGHTNESS, defaultDozeBrightness,
-                UserHandle.USER_CURRENT);
-        mStatusBarWindowManager.updateDozeBrightness(lastValue);
     }
 
     private void setStatusBarWindowViewOptions() {
